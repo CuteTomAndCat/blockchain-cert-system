@@ -1,0 +1,28 @@
+# 组织配置文件（修复版）
+OrdererOrgs:
+  - Name: Orderer
+    Domain: example.com
+    Specs:
+      - Hostname: orderer
+        CommonName: orderer.example.com
+
+PeerOrgs:
+  - Name: Org1
+    Domain: org1.example.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      Start: 0
+      Hostname: peer0
+    Users:
+      Count: 2
+
+  - Name: Org2
+    Domain: org2.example.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      Start: 0
+      Hostname: peer0
+    Users:
+      Count: 2
