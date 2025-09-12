@@ -28,18 +28,25 @@ func GenerateJWT(userID int64, username string, role string) (tokenString string
 	return
 }
 
-// ParseJWT 解析JWT令牌
 func ParseJWT(tokenString string) (*models.JWTClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &models.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("非法的签名方法: %v", token.Header["alg"])
-		}
-		return JWTSecretKey, nil
-	})
+    token, err := jwt.ParseWithClaims(tokenString, &models.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+        if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+            return nil, fmt.Errorf("非法的签名方法: %v", token.Header["alg"])
+        }
+        return JWTSecretKey, nil
+    })
 
-	if claims, ok := token.Claims.(*models.JWTClaims); ok && token.Valid {
-		return claims, nil
-	} else {
-		return nil, err
-	}
+    if err != nil {
+        return nil, fmt.Errorf("token解析失败: %v", err)
+    }
+
+    if claims, ok := token.Claims.(*models.JWTClaims); ok && token.Valid {
+        // 检查token是否过期
+        if time.Now().After(time.Unix(claims.ExpiresAt.Unix(), 0)) {
+            return nil, fmt.Errorf("token已过期")
+        }
+        return claims, nil
+    }
+    
+    return nil, fmt.Errorf("无效的token")
 }

@@ -23,14 +23,6 @@ type PagedResponse struct {
 	TotalPages int         `json:"totalPages"`
 }
 
-// VerificationResult 验证结果
-type VerificationResult struct {
-	CertNumber string      `json:"certNumber"`
-	IsValid    bool        `json:"isValid"`
-	Message    string      `json:"message"`
-	VerifiedAt time.Time   `json:"verifiedAt"`
-	Certificate *Certificate `json:"certificate,omitempty"`
-}
 
 // HistoryRecord 历史记录
 type HistoryRecord struct {
@@ -119,15 +111,38 @@ type Certificate struct {
 	InstrumentAccuracy string    `json:"instrumentAccuracy" gorm:"column:instrument_accuracy"`
 	TestDate           time.Time `json:"testDate" gorm:"column:test_date"`
 	ExpireDate         time.Time `json:"expireDate" gorm:"column:expire_date"`
-	TestResult         string    `json:"testResult" gorm:"column:test_result"` // ENUM('qualified', 'unqualified')
+	TestResult         string    `json:"testResult" gorm:"column:test_result"`
 	BlockchainTxID     string    `json:"blockchainTxId" gorm:"column:blockchain_tx_id"`
+	BlockchainHash     string    `json:"blockchainHash" gorm:"column:blockchain_hash"` // 新增
 	Status             string    `json:"status" gorm:"column:status"`
 	CreatedBy          int64     `json:"createdBy" gorm:"column:created_by"`
 	CreatedAt          time.Time `gorm:"column:created_at" json:"createdAt"`
 	UpdatedAt          time.Time `gorm:"column:updated_at" json:"updatedAt"`
-
-	// 关联数据
+	
 	Customer Customer `json:"customer" gorm:"foreignKey:CustomerID"`
+}
+
+// CertificateVerification 证书验证结果（增强版）
+type CertificateVerification struct {
+	Certificate    *Certificate `json:"certificate"`
+	IsValid        bool         `json:"isValid"`
+	IsHashValid    bool         `json:"isHashValid"`
+	BlockchainTxID string       `json:"blockchainTxId"`
+	BlockchainHash string       `json:"blockchainHash"`
+	Message        string       `json:"message"`
+	VerifiedAt     time.Time    `json:"verifiedAt"`
+}
+
+// VerificationResult 更新验证结果结构
+type VerificationResult struct {
+	CertNumber     string       `json:"certNumber"`
+	IsValid        bool         `json:"isValid"`
+	IsHashValid    bool         `json:"isHashValid"`
+	BlockchainTxID string       `json:"blockchainTxId"`
+	BlockchainHash string       `json:"blockchainHash"`
+	Message        string       `json:"message"`
+	VerifiedAt     time.Time    `json:"verifiedAt"`
+	Certificate    *Certificate `json:"certificate,omitempty"`
 }
 
 // Customer 客户模型

@@ -4,6 +4,10 @@ import (
 	"cert-system/internal/database"
 	"cert-system/internal/models"
 	"gorm.io/gorm"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"time"
 )
 
 // CertificateService 证书服务
@@ -19,9 +23,44 @@ func NewCertificateService(dbClient *database.Client) *CertificateService {
 }
 
 // CreateCertificate 创建证书
+// CreateCertificate 创建证书
 func (s *CertificateService) CreateCertificate(cert *models.Certificate) error {
+	// 先保存到数据库
 	result := s.dbClient.DB.Create(cert)
-	return result.Error
+	if result.Error != nil {
+		return result.Error
+	}
+	
+	// 生成区块链哈希（使用证书数据计算SHA256）
+	hashData := fmt.Sprintf("%s|%d|%s|%s|%s", 
+		cert.CertNumber, 
+		cert.CustomerID, 
+		cert.InstrumentName,
+		cert.TestDate.Format("2006-01-02"),
+		cert.TestResult)
+	
+	hash := sha256.Sum256([]byte(hashData))
+	cert.BlockchainTxID = hex.EncodeToString(hash[:16]) // 使用前16字节作为简短ID
+	cert.BlockchainHash = hex.EncodeToString(hash[:])   // 完整哈希
+	
+	// 更新数据库中的区块链信息
+	updates := map[string]interface{}{
+		"blockchain_tx_id": cert.BlockchainTxID,
+		"blockchain_hash": cert.BlockchainHash,
+	}
+	
+	s.dbClient.DB.Model(cert).Updates(updates)
+	
+	// 如果有Fabric客户端，这里调用链码
+	// if s.fabricClient != nil {
+	//     txID, err := s.fabricClient.CreateCertificate(cert)
+	//     if err == nil {
+	//         cert.BlockchainTxID = txID
+	//         s.dbClient.DB.Model(cert).Update("blockchain_tx_id", txID)
+	//     }
+	// }
+	
+	return nil
 }
 
 // GetCertificateByNumber 根据证书编号获取证书
@@ -63,16 +102,53 @@ func (s *CertificateService) DeleteCertificateByNumber(certNumber string) error 
 }
 
 // VerifyCertificate 验证证书
-func (s *CertificateService) VerifyCertificate(certNumber string) (*models.Certificate, error) {
-	var cert models.Certificate
-	result := s.dbClient.DB.Where("cert_number = ?", certNumber).First(&cert)
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return nil, nil // Return nil for both if not found
-		}
-		return nil, result.Error
-	}
-	return &cert, nil
+func (s *CertificateService) VerifyCertificate(certNumber string) (*models.CertificateVerification, error) {
+    var cert models.Certificate
+    result := s.dbClient.DB.Where("cert_number = ?", certNumber).First(&cert)
+    
+    if result.Error != nil {
+        if result.Error == gorm.ErrRecordNotFound {
+            return &models.CertificateVerification{
+                IsValid: false,
+                Message: "证书不存在",
+            }, nil
+        }
+        return nil, result.Error
+    }
+    
+    // 检查证书状态
+    isValid := true
+    message := "证书有效"
+    
+    if cert.Status == "revoked" {
+        isValid = false
+        message = "证书已撤销"
+    } else if cert.ExpireDate.Before(time.Now()) {
+        isValid = false
+        message = "证书已过期"
+    }
+    
+    // 验证区块链哈希
+    hashData := fmt.Sprintf("%s|%d|%s|%s|%s", 
+        cert.CertNumber, 
+        cert.CustomerID, 
+        cert.InstrumentName,
+        cert.TestDate.Format("2006-01-02"),
+        cert.TestResult)
+    
+    hash := sha256.Sum256([]byte(hashData))
+    currentHash := hex.EncodeToString(hash[:])
+    isHashValid := (currentHash == cert.BlockchainHash)
+    
+    return &models.CertificateVerification{
+        Certificate:    &cert,
+        IsValid:        isValid,
+        IsHashValid:    isHashValid,
+        BlockchainTxID: cert.BlockchainTxID,
+        BlockchainHash: cert.BlockchainHash,
+        Message:        message,
+        VerifiedAt:     time.Now(),
+    }, nil
 }
 
 // GetCertificateHistory 获取证书历史（占位符，需要根据实际业务逻辑实现）

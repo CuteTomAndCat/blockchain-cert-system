@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>计量证书防伪溯源系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <h1>⚡ 计量证书防伪溯源系统</h1>
+            </div>
+            <nav class="nav">
+                <a href="#dashboard" class="nav-link active">仪表盘</a>
+                <a href="#certificates" class="nav-link">证书管理</a>
+                <a href="#verify" class="nav-link">证书验证</a>
+                <a href="#reports" class="nav-link">报表统计</a>
+            </nav>
+            <div class="user-info">
+                <span id="username">未登录</span>
+                <button id="logoutBtn" class="btn-logout" style="display:none;">退出</button>
+            </div>
+        </header>
+
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <h2>用户登录</h2>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="loginUsername" value="admin" required>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="loginPassword" value="admin123" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">登录</button>
+                </form>
+                <div id="loginError" class="error-message"></div>
+            </div>
+        </div>
+
+        <main class="main-content">
+            <section id="dashboard" class="content-section active">
+                <h2>系统概览</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">📋</div>
+                        <div class="stat-value" id="totalCerts">0</div>
+                        <div class="stat-label">证书总数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-value" id="validCerts">0</div>
+                        <div class="stat-label">有效证书</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⏰</div>
+                        <div class="stat-value" id="expiringSoon">0</div>
+                        <div class="stat-label">即将过期</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔗</div>
+                        <div class="stat-value" id="blockchainCerts">0</div>
+                        <div class="stat-label">已上链</div>
+                    </div>
+                </div>
+                
+                <div class="recent-activities">
+                    <h3>最近活动</h3>
+                    <ul id="activityList" class="activity-list">
+                        <li>系统启动成功</li>
+                    </ul>
+                </div>
+            </section>
+
+            <section id="certificates" class="content-section">
+                <div class="section-header">
+                    <h2>证书管理</h2>
+                    <button class="btn btn-primary" onclick="showCreateCertModal()">+ 创建证书</button>
+                </div>
+
+                <div class="filter-bar">
+                    <input type="text" id="searchCert" placeholder="搜索证书编号..." class="search-input">
+                    <select id="statusFilter" class="filter-select">
+                        <option value="">所有状态</option>
+                        <option value="draft">草稿</option>
+                        <option value="testing">测试中</option>
+                        <option value="completed">已完成</option>
+                        <option value="issued">已签发</option>
+                        <option value="revoked">已撤销</option>
+                    </select>
+                    <button onclick="loadCertificates()" class="btn">搜索</button>
+                </div>
+
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>证书编号</th>
+                                <th>器具名称</th>
+                                <th>客户</th>
+                                <th>测试日期</th>
+                                <th>有效期至</th>
+                                <th>状态</th>
+                                <th>区块链</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="certTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination" id="certPagination"></div>
+            </section>
+
+            <section id="verify" class="content-section">
+                <h2>证书验证</h2>
+                <div class="verify-container">
+                    <div class="verify-form">
+                        <h3>输入证书编号进行验证</h3>
+                        <input type="text" id="verifyCertNumber" placeholder="请输入证书编号" class="verify-input">
+                        <button onclick="verifyCertificate()" class="btn btn-primary btn-large">验证证书</button>
+                    </div>
+                    
+                    <div id="verifyResult" class="verify-result" style="display:none;">
+                        <div id="verifyStatus" class="verify-status"></div>
+                        <div id="certDetails" class="cert-details"></div>
+                        <div id="certWorkflow" class="cert-workflow"></div>
+                        <div id="certTestData" class="cert-test-data"></div>
+                        <div id="blockchainInfo" class="blockchain-info"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="reports" class="content-section">
+                <h2>报表统计</h2>
+                <div class="reports-grid">
+                    <div class="chart-card">
+                        <h3>证书状态分布</h3>
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>月度证书统计</h3>
+                        <canvas id="monthlyChart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <div id="createCertModal" class="modal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>创建新证书</h2>
+                    <span class="close" onclick="closeModal('createCertModal')">&times;</span>
+                </div>
+                <form id="createCertForm">
+                    <div class="form-section">
+                        <h3>证书基本信息</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>证书编号 *</label>
+                                <input type="text" name="certNumber" id="newCertNumber" required>
+                            </div>
+                            <div class="form-group">
+                                <label>客户ID *</label>
+                                <input type="number" name="customerId" value="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label>器具名称 *</label>
+                                <input type="text" name="instrumentName" required>
+                            </div>
+                            <div class="form-group">
+                                <label>器具编号</label>
+                                <input type="text" name="instrumentNumber">
+                            </div>
+                            <div class="form-group">
+                                <label>制造厂</label>
+                                <input type="text" name="manufacturer">
+                            </div>
+                            <div class="form-group">
+                                <label>型号规格</label>
+                                <input type="text" name="modelSpec">
+                            </div>
+                            <div class="form-group">
+                                <label>器具准确度</label>
+                                <input type="text" name="instrumentAccuracy">
+                            </div>
+                            <div class="form-group">
+                                <label>测试日期 *</label>
+                                <input type="date" name="testDate" required>
+                            </div>
+                            <div class="form-group">
+                                <label>有效期至</label>
+                                <input type="date" name="expireDate">
+                            </div>
+                            <div class="form-group">
+                                <label>测试结果 *</label>
+                                <select name="testResult" required>
+                                    <option value="qualified">合格</option>
+                                    <option value="unqualified">不合格</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>测试数据</h3>
+                        <div id="testDataContainer">
+                            <div class="test-data-row" data-index="0">
+                                <div class="test-data-grid">
+                                    <div class="form-group">
+                                        <label>设备地址</label>
+                                        <input type="text" name="deviceAddr_0" value="DEV-01" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>测试点</label>
+                                        <input type="text" name="testPoint_0" placeholder="如: P1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>实际百分比</label>
+                                        <input type="number" name="actualPercentage_0" step="0.01" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>比差值</label>
+                                        <input type="number" name="ratioError_0" step="0.01" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>角差值</label>
+                                        <input type="number" name="angleError_0" step="0.01" required>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="addTestDataRow()">+ 添加测试点</button>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('createCertModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">创建证书并添加测试数据</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="viewCertModal" class="modal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2 id="modalTitle">证书详情</h2>
+                    <span class="close" onclick="closeModal('viewCertModal')">&times;</span>
+                </div>
+                <div id="certDetailContent" class="cert-detail-content"></div>
+            </div>
+        </div>
+
+        <div id="editCertModal" class="modal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>编辑证书</h2>
+                    <span class="close" onclick="closeModal('editCertModal')">&times;</span>
+                </div>
+                <form id="editCertForm">
+                    <input type="hidden" id="editCertNumber">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>证书编号</label>
+                            <input type="text" id="editCertNumberDisplay" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label>客户ID</label>
+                            <input type="number" id="editCustomerId" required>
+                        </div>
+                        <div class="form-group">
+                            <label>器具名称</label>
+                            <input type="text" id="editInstrumentName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>器具编号</label>
+                            <input type="text" id="editInstrumentNumber">
+                        </div>
+                        <div class="form-group">
+                            <label>制造厂</label>
+                            <input type="text" id="editManufacturer">
+                        </div>
+                        <div class="form-group">
+                            <label>型号规格</label>
+                            <input type="text" id="editModelSpec">
+                        </div>
+                        <div class="form-group">
+                            <label>器具准确度</label>
+                            <input type="text" id="editInstrumentAccuracy">
+                        </div>
+                        <div class="form-group">
+                            <label>测试日期</label>
+                            <input type="date" id="editTestDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label>有效期至</label>
+                            <input type="date" id="editExpireDate">
+                        </div>
+                        <div class="form-group">
+                            <label>测试结果</label>
+                            <select id="editTestResult" required>
+                                <option value="qualified">合格</option>
+                                <option value="unqualified">不合格</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>证书状态</label>
+                            <select id="editStatus" required>
+                                <option value="draft">草稿</option>
+                                <option value="testing">测试中</option>
+                                <option value="completed">已完成</option>
+                                <option value="issued">已签发</option>
+                                <option value="revoked">已撤销</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('editCertModal')">取消</button>
+                        <button type="submit" class="btn btn-primary">保存修改</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -5,23 +5,25 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"github.com/gin-contrib/cors"
+	"time"  // 添加这个import
 )
 
 // SetupRoutes 设置API路由
 func SetupRoutes(router *gin.Engine, certService *service.CertificateService, testDataService *service.TestDataService, authService *service.AuthService) {
-	 router.Use(cors.New(cors.Config{
-        AllowOrigins:     []string{"*"}, // 生产环境可限制具体域名
-        AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-        AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-        ExposeHeaders:    []string{"Content-Length"},
-        AllowCredentials: true,
-    }))
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"}, // 生产环境可限制具体域名
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+	}))
 	
 	// 健康检查
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
 			"message": "计量证书防伪溯源系统运行正常",
+			"time":    time.Now().Format(time.RFC3339),
 		})
 	})
 
@@ -31,9 +33,10 @@ func SetupRoutes(router *gin.Engine, certService *service.CertificateService, te
 		// 认证相关路由
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/login", NewAuthHandler(authService).Login)
-			auth.POST("/logout", AuthMiddleware(), NewAuthHandler(authService).Logout)
-			auth.GET("/profile", AuthMiddleware(), NewAuthHandler(authService).GetProfile)
+			authHandler := NewAuthHandler(authService)
+			auth.POST("/login", authHandler.Login)
+			auth.POST("/logout", AuthMiddleware(), authHandler.Logout)
+			auth.GET("/profile", AuthMiddleware(), authHandler.GetProfile)
 		}
 
 		// 证书相关路由
@@ -45,6 +48,7 @@ func SetupRoutes(router *gin.Engine, certService *service.CertificateService, te
 			certificates.GET("", certHandler.GetAllCertificates)
 			certificates.GET("/:certNumber", certHandler.GetCertificate)
 			certificates.PUT("/:certNumber", certHandler.UpdateCertificate)
+			certificates.DELETE("/:certNumber", certHandler.DeleteCertificate)  // 确保这行没有反斜杠
 			certificates.POST("/:certNumber/verify", certHandler.VerifyCertificate)
 			certificates.GET("/:certNumber/history", certHandler.GetCertificateHistory)
 		}
@@ -54,10 +58,8 @@ func SetupRoutes(router *gin.Engine, certService *service.CertificateService, te
 		testData.Use(AuthMiddleware())
 		{
 			testHandler := NewTestDataHandler(testDataService, certService)
-			testData.POST("", testHandler.AddTestData)                
+			testData.POST("", testHandler.AddTestData)
 			testData.GET("/certificate/:certId", testHandler.GetTestDataByCert)
-			// 如果需要生成测试数据，可以保留：
-			// testData.POST("/generate/:certId", testHandler.GenerateTestData)
 		}
 
 		// 公开验证接口（不需要认证）

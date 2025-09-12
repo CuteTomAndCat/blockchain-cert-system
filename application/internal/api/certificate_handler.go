@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"fmt"
 	"errors"
 )
 
@@ -142,8 +143,20 @@ func (h *CertificateHandler) GetCertificate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "获取证书成功", Data: cert})
+	// 返回包含区块链信息的证书
+	response := gin.H{
+		"certificate": cert,
+		"blockchain": gin.H{
+			"txId":           cert.BlockchainTxID,
+			"hash":           cert.BlockchainHash,
+			"explorerUrl":    fmt.Sprintf("https://explorer.example.com/tx/%s", cert.BlockchainTxID),
+			"shortHash":      cert.BlockchainHash[:16] + "...", // 显示简短哈希
+		},
+	}
+
+	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "获取证书成功", Data: response})
 }
+
 
 // UpdateCertificate 更新证书
 func (h *CertificateHandler) UpdateCertificate(c *gin.Context) {
@@ -224,18 +237,45 @@ func (h *CertificateHandler) UpdateCertificate(c *gin.Context) {
 
 // DeleteCertificate 删除证书
 func (h *CertificateHandler) DeleteCertificate(c *gin.Context) {
-	certNumber := c.Param("certNumber")
-	if certNumber == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "证书编号不能为空"})
-		return
-	}
+    certNumber := c.Param("certNumber")
+    if certNumber == "" {
+        c.JSON(http.StatusBadRequest, models.APIResponse{
+            Code:    400, 
+            Message: "证书编号不能为空",
+        })
+        return
+    }
 
-	if err := h.certService.DeleteCertificateByNumber(certNumber); err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "删除证书失败: " + err.Error()})
-		return
-	}
+    // 先检查证书是否存在
+    _, err := h.certService.GetCertificateByNumber(certNumber)
+    if err != nil {
+        if err == gorm.ErrRecordNotFound {
+            c.JSON(http.StatusNotFound, models.APIResponse{
+                Code:    404,
+                Message: "证书不存在",
+            })
+            return
+        }
+        c.JSON(http.StatusInternalServerError, models.APIResponse{
+            Code:    500,
+            Message: "查询证书失败: " + err.Error(),
+        })
+        return
+    }
 
-	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "证书删除成功"})
+    if err := h.certService.DeleteCertificateByNumber(certNumber); err != nil {
+        c.JSON(http.StatusInternalServerError, models.APIResponse{
+            Code:    500, 
+            Message: "删除证书失败: " + err.Error(),
+        })
+        return
+    }
+
+    c.JSON(http.StatusOK, models.APIResponse{
+        Code:    200, 
+        Message: "证书删除成功",
+        Data:    gin.H{"certNumber": certNumber},
+    })
 }
 
 // VerifyCertificate 验证证书
@@ -246,31 +286,28 @@ func (h *CertificateHandler) VerifyCertificate(c *gin.Context) {
 		return
 	}
 
-	cert, err := h.certService.VerifyCertificate(certNumber)
+	verification, err := h.certService.VerifyCertificate(certNumber)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "验证失败: " + err.Error()})
 		return
 	}
 
-	var isValid bool
-	var message string
-	if cert != nil {
-		isValid = true
-		message = "证书存在且有效"
-	} else {
-		isValid = false
-		message = "证书不存在"
-	}
-
 	result := models.VerificationResult{
-		CertNumber:  certNumber,
-		IsValid:     isValid,
-		Message:     message,
-		VerifiedAt:  time.Now(),
-		Certificate: cert,
+		CertNumber:     certNumber,
+		IsValid:        verification.IsValid,
+		IsHashValid:    verification.IsHashValid,
+		BlockchainTxID: verification.BlockchainTxID,
+		BlockchainHash: verification.BlockchainHash,
+		Message:        verification.Message,
+		VerifiedAt:     verification.VerifiedAt,
+		Certificate:    verification.Certificate,
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "验证结果", Data: result})
+	c.JSON(http.StatusOK, models.APIResponse{
+		Code:    200, 
+		Message: "验证完成", 
+		Data:    result,
+	})
 }
 
 // PublicVerifyCertificate 公开验证接口

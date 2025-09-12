@@ -33,6 +33,8 @@ type Certificate struct {
 	CreatedAt         string    `json:"createdAt"`         // 创建时间
 	UpdatedAt         string    `json:"updatedAt"`         // 更新时间
 	TestDataHash      string    `json:"testDataHash"`      // 测试数据哈希
+	BlockchainTxID    string    `json:"blockchainTxId"`    // 区块链交易ID
+	BlockchainHash    string    `json:"blockchainHash"`     // 区块链哈希
 }
 
 // TestData 测试数据结构体
@@ -68,33 +70,42 @@ func (c *CertChaincode) InitLedger(ctx contractapi.TransactionContextInterface) 
 }
 
 // CreateCertificate 创建证书
-func (c *CertChaincode) CreateCertificate(ctx contractapi.TransactionContextInterface, certData string) error {
+func (c *CertChaincode) CreateCertificate(ctx contractapi.TransactionContextInterface, certData string) (string, error) {
 	var cert Certificate
 	err := json.Unmarshal([]byte(certData), &cert)
 	if err != nil {
-		return fmt.Errorf("证书数据解析失败: %v", err)
+		return "", fmt.Errorf("证书数据解析失败: %v", err)
 	}
 
 	// 检查证书是否已存在
 	exists, err := c.CertificateExists(ctx, cert.CertNumber)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if exists {
-		return fmt.Errorf("证书 %s 已存在", cert.CertNumber)
+		return "", fmt.Errorf("证书 %s 已存在", cert.CertNumber)
 	}
 
-	// 设置创建时间
+	// 获取交易ID
+	txID := ctx.GetStub().GetTxID()
+	
+	// 设置创建时间和区块链交易ID
 	cert.CreatedAt = time.Now().Format(time.RFC3339)
 	cert.UpdatedAt = cert.CreatedAt
 	cert.Status = "created"
+	cert.BlockchainTxID = txID  // 添加这个字段
 
 	certJSON, err := json.Marshal(cert)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return ctx.GetStub().PutState(cert.CertNumber, certJSON)
+	err = ctx.GetStub().PutState(cert.CertNumber, certJSON)
+	if err != nil {
+		return "", err
+	}
+	
+	return txID, nil  // 返回交易ID
 }
 
 // CertificateExists 检查证书是否存在
