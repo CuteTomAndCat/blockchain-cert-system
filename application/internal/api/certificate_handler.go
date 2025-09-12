@@ -1,13 +1,14 @@
 package api
 
 import (
-	"cert-system/internal/models"
 	"cert-system/internal/service"
+	"cert-system/internal/models"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/gin-gonic/gin"
+	"errors"
 )
 
 // CertificateHandler 证书处理器
@@ -15,51 +16,59 @@ type CertificateHandler struct {
 	certService *service.CertificateService
 }
 
-// NewCertificateHandler 创建证书处理器
+// NewCertificateHandler 创建新的 CertificateHandler
 func NewCertificateHandler(certService *service.CertificateService) *CertificateHandler {
 	return &CertificateHandler{
 		certService: certService,
 	}
 }
 
+// parseDate 辅助函数，用于解析日期字符串
+func parseDate(dateStr string) (time.Time, error) {
+	layouts := []string{"2006-01-02", "2006/01/02"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, dateStr); err == nil {
+			return t, nil
+		}
+	}
+	if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
+		return t, nil
+	}
+	return time.Time{}, errors.New("无法解析日期: " + dateStr + ". 支持格式如 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SSZ")
+}
+
 // CreateCertificate 创建证书
 func (h *CertificateHandler) CreateCertificate(c *gin.Context) {
 	var req models.CreateCertificateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "请求参数错误: " + err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "请求参数错误: " + err.Error()})
 		return
 	}
 
-	// 解析日期
-	testDate, err := time.Parse("2006-01-02", req.TestDate)
+	// 转换日期格式
+	testDate, err := parseDate(req.TestDate)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "测试日期格式错误",
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "testDate格式错误: " + err.Error()})
+		return
+	}
+	expireDate, err := parseDate(req.ExpireDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "expireDate格式错误: " + err.Error()})
 		return
 	}
 
-	var expireDate time.Time
-	if req.ExpireDate != "" {
-		expireDate, err = time.Parse("2006-01-02", req.ExpireDate)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, models.APIResponse{
-				Code:    400,
-				Message: "有效期日期格式错误",
-			})
-			return
-		}
-	} else {
-		// 默认有效期为测试日期后3年
-		expireDate = testDate.AddDate(3, 0, 0)
+	// 验证 testResult 是否为有效枚举值
+	if req.TestResult != "qualified" && req.TestResult != "unqualified" {
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "testResult 必须是 'qualified' 或 'unqualified'"})
+		return
 	}
 
-	// 获取当前用户ID
-	userID, _ := c.Get("userID")
+	// 从 JWT 中获取当前用户 ID
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, models.APIResponse{Code: 401, Message: "未找到用户信息"})
+		return
+	}
 
 	cert := &models.Certificate{
 		CertNumber:         req.CertNumber,
@@ -73,252 +82,215 @@ func (h *CertificateHandler) CreateCertificate(c *gin.Context) {
 		ExpireDate:         expireDate,
 		TestResult:         req.TestResult,
 		Status:             "draft",
-		CreatedBy:          userID.(int64),
+		CreatedBy:          userID.(int64), 
 	}
 
-	err = h.certService.CreateCertificate(cert)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Code:    500,
-			Message: "创建证书失败: " + err.Error(),
-		})
+	if err := h.certService.CreateCertificate(cert); err != nil {
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "创建证书失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Code:    200,
-		Message: "证书创建成功",
-		Data:    cert,
-	})
+	c.JSON(http.StatusCreated, models.APIResponse{Code: 201, Message: "证书创建成功", Data: cert})
 }
 
-// GetAllCertificates 获取所有证书
+// GetAllCertificates 获取所有证书（支持分页）
 func (h *CertificateHandler) GetAllCertificates(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
+	pageStr := c.DefaultQuery("page", "1")
+	pageSizeStr := c.DefaultQuery("pageSize", "10")
 
-	if page < 1 {
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
 		page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil || pageSize < 1 {
 		pageSize = 10
 	}
 
-	certificates, total, err := h.certService.GetAllCertificates(page, pageSize)
+	certs, total, err := h.certService.GetAllCertificates(page, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Code:    500,
-			Message: "获取证书列表失败: " + err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "获取证书列表失败: " + err.Error()})
 		return
 	}
-
-	totalPages := (total + pageSize - 1) / pageSize
 
 	c.JSON(http.StatusOK, models.PagedResponse{
 		Code:       200,
-		Message:    "获取成功",
-		Data:       certificates,
-		Total:      total,
+		Message:    "获取证书列表成功",
+		Data:       certs,
+		Total:      int(total),
 		Page:       page,
 		PageSize:   pageSize,
-		TotalPages: totalPages,
+		TotalPages: (int(total) + pageSize - 1) / pageSize,
 	})
 }
 
-// GetCertificate 获取单个证书
+// GetCertificate 根据证书编号获取证书
 func (h *CertificateHandler) GetCertificate(c *gin.Context) {
 	certNumber := c.Param("certNumber")
 	if certNumber == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "证书编号不能为空",
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "证书编号不能为空"})
 		return
 	}
 
-	cert, err := h.certService.GetCertificate(certNumber)
+	cert, err := h.certService.GetCertificateByNumber(certNumber)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Code:    404,
-			Message: err.Error(),
-		})
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, models.APIResponse{Code: 404, Message: "证书未找到"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "获取证书失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Code:    200,
-		Message: "获取成功",
-		Data:    cert,
-	})
+	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "获取证书成功", Data: cert})
 }
 
 // UpdateCertificate 更新证书
 func (h *CertificateHandler) UpdateCertificate(c *gin.Context) {
 	certNumber := c.Param("certNumber")
 	if certNumber == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "证书编号不能为空",
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "证书编号不能为空"})
 		return
 	}
 
-	var req models.CreateCertificateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "请求参数错误: " + err.Error(),
-		})
+	var updatedCertData struct {
+		CertNumber         string `json:"certNumber"`
+		CustomerID         int64  `json:"customerId"`
+		InstrumentName     string `json:"instrumentName"`
+		InstrumentNumber   string `json:"instrumentNumber"`
+		Manufacturer       string `json:"manufacturer"`
+		ModelSpec          string `json:"modelSpec"`
+		InstrumentAccuracy string `json:"instrumentAccuracy"`
+		TestDate           string `json:"testDate" binding:"required"`
+		ExpireDate         string `json:"expireDate"`
+		TestResult         string `json:"testResult" binding:"required"`
+		Status             string `json:"status"`
+	}
+
+	if err := c.ShouldBindJSON(&updatedCertData); err != nil {
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "请求参数错误: " + err.Error()})
 		return
 	}
 
-	// 获取现有证书
-	cert, err := h.certService.GetCertificate(certNumber)
+	// 转换日期格式
+	testDate, err := parseDate(updatedCertData.TestDate)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.APIResponse{
-			Code:    404,
-			Message: err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "testDate格式错误: " + err.Error()})
 		return
 	}
-
-	// 解析日期
-	testDate, err := time.Parse("2006-01-02", req.TestDate)
+	expireDate, err := parseDate(updatedCertData.ExpireDate)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "测试日期格式错误",
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "expireDate格式错误: " + err.Error()})
 		return
 	}
 
-	var expireDate time.Time
-	if req.ExpireDate != "" {
-		expireDate, err = time.Parse("2006-01-02", req.ExpireDate)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, models.APIResponse{
-				Code:    400,
-				Message: "有效期日期格式错误",
-			})
+	// 验证 testResult 是否为有效枚举值
+	if updatedCertData.TestResult != "qualified" && updatedCertData.TestResult != "unqualified" {
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "testResult 必须是 'qualified' 或 'unqualified'"})
+		return
+	}
+
+	existingCert, err := h.certService.GetCertificateByNumber(certNumber)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, models.APIResponse{Code: 404, Message: "证书未找到"})
 			return
 		}
-	} else {
-		expireDate = testDate.AddDate(3, 0, 0)
-	}
-
-	// 更新证书信息
-	cert.CustomerID = req.CustomerID
-	cert.InstrumentName = req.InstrumentName
-	cert.InstrumentNumber = req.InstrumentNumber
-	cert.Manufacturer = req.Manufacturer
-	cert.ModelSpec = req.ModelSpec
-	cert.InstrumentAccuracy = req.InstrumentAccuracy
-	cert.TestDate = testDate
-	cert.ExpireDate = expireDate
-	cert.TestResult = req.TestResult
-
-	err = h.certService.UpdateCertificate(cert)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Code:    500,
-			Message: "更新证书失败: " + err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "获取证书失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Code:    200,
-		Message: "证书更新成功",
-		Data:    cert,
-	})
+	// 更新字段
+	existingCert.CertNumber = updatedCertData.CertNumber
+	existingCert.CustomerID = updatedCertData.CustomerID
+	existingCert.InstrumentName = updatedCertData.InstrumentName
+	existingCert.InstrumentNumber = updatedCertData.InstrumentNumber
+	existingCert.Manufacturer = updatedCertData.Manufacturer
+	existingCert.ModelSpec = updatedCertData.ModelSpec
+	existingCert.InstrumentAccuracy = updatedCertData.InstrumentAccuracy
+	existingCert.TestDate = testDate
+	existingCert.ExpireDate = expireDate
+	existingCert.TestResult = updatedCertData.TestResult
+	existingCert.Status = updatedCertData.Status
+	existingCert.UpdatedAt = time.Now() // ✅ 自动更新时间
+
+	if err := h.certService.UpdateCertificate(existingCert); err != nil {
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "更新证书失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "证书更新成功", Data: existingCert})
 }
 
-// VerifyCertificate 验证证书（需要认证）
+// DeleteCertificate 删除证书
+func (h *CertificateHandler) DeleteCertificate(c *gin.Context) {
+	certNumber := c.Param("certNumber")
+	if certNumber == "" {
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "证书编号不能为空"})
+		return
+	}
+
+	if err := h.certService.DeleteCertificateByNumber(certNumber); err != nil {
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "删除证书失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "证书删除成功"})
+}
+
+// VerifyCertificate 验证证书
 func (h *CertificateHandler) VerifyCertificate(c *gin.Context) {
 	certNumber := c.Param("certNumber")
 	if certNumber == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "证书编号不能为空",
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "证书编号不能为空"})
 		return
 	}
 
-	result, err := h.certService.VerifyCertificate(certNumber)
+	cert, err := h.certService.VerifyCertificate(certNumber)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Code:    500,
-			Message: "验证失败: " + err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "验证失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Code:    200,
-		Message: "验证完成",
-		Data:    result,
-	})
+	var isValid bool
+	var message string
+	if cert != nil {
+		isValid = true
+		message = "证书存在且有效"
+	} else {
+		isValid = false
+		message = "证书不存在"
+	}
+
+	result := models.VerificationResult{
+		CertNumber:  certNumber,
+		IsValid:     isValid,
+		Message:     message,
+		VerifiedAt:  time.Now(),
+		Certificate: cert,
+	}
+
+	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "验证结果", Data: result})
 }
 
-// PublicVerifyCertificate 公开验证证书（无需认证）
+// PublicVerifyCertificate 公开验证接口
 func (h *CertificateHandler) PublicVerifyCertificate(c *gin.Context) {
-	certNumber := c.Param("certNumber")
-	if certNumber == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "证书编号不能为空",
-		})
-		return
-	}
-
-	result, err := h.certService.VerifyCertificate(certNumber)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Code:    500,
-			Message: "验证失败: " + err.Error(),
-		})
-		return
-	}
-
-	// 公开验证只返回基本验证信息，不返回详细证书内容
-	publicResult := map[string]interface{}{
-		"certNumber": result.CertNumber,
-		"isValid":    result.IsValid,
-		"message":    result.Message,
-		"verifiedAt": result.VerifiedAt,
-	}
-
-	c.JSON(http.StatusOK, models.APIResponse{
-		Code:    200,
-		Message: "验证完成",
-		Data:    publicResult,
-	})
+	h.VerifyCertificate(c)
 }
 
-// GetCertificateHistory 获取证书变更历史
+// GetCertificateHistory 获取证书历史
 func (h *CertificateHandler) GetCertificateHistory(c *gin.Context) {
 	certNumber := c.Param("certNumber")
 	if certNumber == "" {
-		c.JSON(http.StatusBadRequest, models.APIResponse{
-			Code:    400,
-			Message: "证书编号不能为空",
-		})
+		c.JSON(http.StatusBadRequest, models.APIResponse{Code: 400, Message: "证书编号不能为空"})
 		return
 	}
 
 	history, err := h.certService.GetCertificateHistory(certNumber)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.APIResponse{
-			Code:    500,
-			Message: "获取历史记录失败: " + err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, models.APIResponse{Code: 500, Message: "获取历史记录失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.APIResponse{
-		Code:    200,
-		Message: "获取成功",
-		Data:    history,
-	})
+	c.JSON(http.StatusOK, models.APIResponse{Code: 200, Message: "获取历史记录成功", Data: history})
 }

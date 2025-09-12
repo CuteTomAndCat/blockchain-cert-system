@@ -1,0 +1,6 @@
+server:
+  port: "8080"
+database:
+  dsn: "root:rootpass123@tcp(127.0.0.1:3306)/cert_system?charset=utf8mb4&parseTime=True&loc=Local"
+jwt:
+  secret: "your_super_secret_key"

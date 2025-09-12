@@ -1,41 +1,25 @@
 package database
 
 import (
-	"database/sql"
 	"fmt"
-	"cert-system/config"
-
-	_ "github.com/go-sql-driver/mysql"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
-// DB 数据库连接结构
-type DB struct {
-	*sql.DB
+// ErrRecordNotFound 是一个公共的错误变量，用于表示未找到记录
+var ErrRecordNotFound = gorm.ErrRecordNotFound
+
+// Client 数据库客户端结构
+type Client struct {
+	DB *gorm.DB
 }
 
-// Init 初始化数据库连接
-func Init(config config.DatabaseConfig) (*DB, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		config.Username,
-		config.Password,
-		config.Host,
-		config.Port,
-		config.Database,
-	)
-
-	db, err := sql.Open("mysql", dsn)
+// NewClient 创建并返回一个新的数据库客户端
+func NewClient(dsn string) (*Client, error) {
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("数据库连接失败: %v", err)
+		return nil, fmt.Errorf("无法连接到数据库: %w", err)
 	}
 
-	// 测试连接
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("数据库ping失败: %v", err)
-	}
-
-	// 设置连接池参数
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(10)
-
-	return &DB{db}, nil
+	return &Client{DB: db}, nil
 }

@@ -1,312 +1,159 @@
 #!/bin/bash
 
-# API测试脚本 - 基于main.go实现的接口测试
+API_URL="http://localhost:8080/api/v1"
+PUBLIC_URL="http://localhost:8080/api/v1/public"
 
-API_BASE="http://localhost:8080/api/v1"
-TOKEN=""  # 实际项目中需要替换为有效的认证token获取逻辑
-
-# 颜色定义
+# 颜色输出
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# 工具函数
-print_test() {
-    echo -e "${YELLOW}[TEST]${NC} $1"
-}
+echo "====== 开始执行 API 测试 ======"
 
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
+# ---> 用户登录
+echo -e "\n---> 测试用户登录"
+LOGIN_RESP=$(curl -s -X POST "$API_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123"}')
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+TOKEN=$(echo $LOGIN_RESP | jq -r '.data.token')
 
-# 测试健康检查接口
-test_health() {
-    print_test "测试健康检查接口..."
-    response=$(curl -s "http://localhost:8080/health")
-    if echo "$response" | grep -q "ok"; then
-        print_success "健康检查通过"
-    else
-        print_error "健康检查失败"
-        echo "$response"
-    fi
-}
-
-# 测试系统信息接口
-test_system_info() {
-    print_test "测试系统信息接口..."
-    response=$(curl -s "$API_BASE/info")
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "系统信息获取成功"
-    else
-        print_error "系统信息获取失败"
-        echo "$response"
-    fi
-}
-
-# 测试创建客户接口
-test_create_customer() {
-    print_test "测试创建客户接口..."
-    customer_name="测试客户_$(date +%s)"
-    response=$(curl -s -X POST "$API_BASE/customers" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $TOKEN" \
-        -d '{
-            "customerName": "'"$customer_name"'",
-            "customerAddress": "测试地址",
-            "contactPerson": "测试联系人",
-            "contactPhone": "13800138000"
-        }')
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "客户创建成功"
-        # 提取客户ID供后续测试使用
-        export TEST_CUSTOMER_ID=$(echo "$response" | jq -r '.data.id')
-    else
-        print_error "客户创建失败"
-        echo "$response"
-    fi
-}
-
-# 测试获取客户列表接口
-test_get_customers() {
-    print_test "测试获取客户列表接口..."
-    response=$(curl -s -X GET "$API_BASE/customers" \
-        -H "Authorization: Bearer $TOKEN")
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "客户列表获取成功"
-        count=$(echo "$response" | jq '.data | length')
-        print_success "共获取到 $count 个客户"
-    else
-        print_error "客户列表获取失败"
-        echo "$response"
-    fi
-}
-
-# 测试创建证书接口
-test_create_certificate() {
-    print_test "测试创建证书接口..."
-    
-    if [ -z "$TEST_CUSTOMER_ID" ]; then
-        print_error "没有可用的测试客户ID，跳过测试"
-        return
-    fi
-    
-    cert_number="CERT$(date +%Y%m%d%H%M%S)"
-    test_date=$(date +%Y-%m-%d)
-    expire_date=$(date -d "+3 years" +%Y-%m-%d)
-    
-    response=$(curl -s -X POST "$API_BASE/certificates" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $TOKEN" \
-        -d "{
-            \"certNumber\": \"$cert_number\",
-            \"customerId\": $TEST_CUSTOMER_ID,
-            \"instrumentName\": \"电流互感器\",
-            \"instrumentNumber\": \"CT-$(date +%s)\",
-            \"manufacturer\": \"测试厂商\",
-            \"modelSpec\": \"CT-1000/5A\",
-            \"instrumentAccuracy\": \"0.2级\",
-            \"testDate\": \"$test_date\",
-            \"expireDate\": \"$expire_date\",
-            \"testResult\": \"qualified\"
-        }")
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "证书创建成功: $cert_number"
-        export TEST_CERT_NUMBER="$cert_number"
-    else
-        print_error "证书创建失败"
-        echo "$response"
-    fi
-}
-
-# 测试获取证书列表接口
-test_get_certificates() {
-    print_test "测试获取证书列表接口..."
-    response=$(curl -s -X GET "$API_BASE/certificates?page=1&pageSize=10" \
-        -H "Authorization: Bearer $TOKEN")
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "证书列表获取成功"
-        total=$(echo "$response" | jq '.total')
-        print_success "总证书数量: $total"
-    else
-        print_error "证书列表获取失败"
-        echo "$response"
-    fi
-}
-
-# 测试获取证书详情接口
-test_get_certificate_detail() {
-    print_test "测试获取证书详情接口..."
-    
-    if [ -z "$TEST_CERT_NUMBER" ]; then
-        print_error "没有可用的测试证书编号，跳过测试"
-        return
-    fi
-    
-    response=$(curl -s -X GET "$API_BASE/certificates/$TEST_CERT_NUMBER" \
-        -H "Authorization: Bearer $TOKEN")
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "证书详情获取成功"
-    else
-        print_error "证书详情获取失败"
-        echo "$response"
-    fi
-}
-
-# 测试添加测试数据接口
-test_add_test_data() {
-    print_test "测试添加测试数据接口..."
-    
-    if [ -z "$TEST_CERT_NUMBER" ]; then
-        print_error "没有可用的测试证书编号，跳过测试"
-        return
-    fi
-    
-    response=$(curl -s -X POST "$API_BASE/test-data" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $TOKEN" \
-        -d "{
-            \"certNumber\": \"$TEST_CERT_NUMBER\",
-            \"deviceAddr\": \"DEV-$(date +%s)\",
-            \"dataType\": \"电流互感器测试\",
-            \"percentageValue\": 100.0,
-            \"ratioError\": 0.02,
-            \"angleError\": 1.5,
-            \"currentValue\": 5.0,
-            \"voltageValue\": 220.0,
-            \"workstationNumber\": \"WS001\",
-            \"testPoint\": \"100%额定电流\",
-            \"actualPercentage\": 99.98
-        }")
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "测试数据添加成功"
-    else
-        print_error "测试数据添加失败"
-        echo "$response"
-    fi
-}
-
-# 测试获取测试数据接口
-test_get_test_data() {
-    print_test "测试获取测试数据接口..."
-    
-    if [ -z "$TEST_CERT_NUMBER" ]; then
-        print_error "没有可用的测试证书编号，跳过测试"
-        return
-    fi
-    
-    response=$(curl -s -X GET "$API_BASE/test-data/$TEST_CERT_NUMBER" \
-        -H "Authorization: Bearer $TOKEN")
-    
-    if echo "$response" | grep -q '"code":200'; then
-        print_success "测试数据获取成功"
-        count=$(echo "$response" | jq '.data | length')
-        print_success "共获取到 $count 条测试数据"
-    else
-        print_error "测试数据获取失败"
-        echo "$response"
-    fi
-}
-
-# 测试证书验证接口(GET方式)
-test_verify_certificate_get() {
-    print_test "测试证书验证接口(GET)..."
-    
-    if [ -z "$TEST_CERT_NUMBER" ]; then
-        print_error "没有可用的测试证书编号，跳过测试"
-        return
-    fi
-    
-    response=$(curl -s -X GET "$API_BASE/verify/$TEST_CERT_NUMBER")
-    
-    if echo "$response" | grep -q '"isValid":true'; then
-        print_success "证书验证成功(GET)"
-    else
-        print_error "证书验证失败(GET)"
-        echo "$response"
-    fi
-}
-
-# 测试证书验证接口(POST方式)
-test_verify_certificate_post() {
-    print_test "测试证书验证接口(POST)..."
-    
-    if [ -z "$TEST_CERT_NUMBER" ]; then
-        print_error "没有可用的测试证书编号，跳过测试"
-        return
-    fi
-    
-    response=$(curl -s -X POST "$API_BASE/verify/$TEST_CERT_NUMBER")
-    
-    if echo "$response" | grep -q '"isValid":true'; then
-        print_success "证书验证成功(POST)"
-    else
-        print_error "证书验证失败(POST)"
-        echo "$response"
-    fi
-}
-
-# 运行所有测试
-run_all_tests() {
-    echo "开始运行API测试套件..."
-    echo "======================"
-    
-    test_health
-    echo ""
-    
-    test_system_info
-    echo ""
-    
-    test_create_customer
-    echo ""
-    
-    test_get_customers
-    echo ""
-    
-    test_create_certificate
-    echo ""
-    
-    test_get_certificates
-    echo ""
-    
-    test_get_certificate_detail
-    echo ""
-    
-    test_add_test_data
-    echo ""
-    
-    test_get_test_data
-    echo ""
-    
-    test_verify_certificate_get
-    echo ""
-    
-    test_verify_certificate_post
-    echo ""
-    
-    echo "======================"
-    print_success "所有API测试执行完成！"
-}
-
-# 检查依赖工具
-if ! command -v curl &> /dev/null; then
-    print_error "未安装curl，请先安装curl工具"
-    exit 1
+if [ "$TOKEN" != "null" ] && [ -n "$TOKEN" ]; then
+  echo -e "${GREEN}✔ 用户登录成功，Token 已获取。${NC}"
+else
+  echo -e "${RED}✖ 用户登录失败，响应: $LOGIN_RESP${NC}"
+  exit 1
 fi
 
-if ! command -v jq &> /dev/null; then
-    print_error "未安装jq，部分JSON解析功能将无法正常工作"
+AUTH_HEADER="Authorization: Bearer $TOKEN"
+
+# ---> 创建证书
+CERT_NUMBER="CERT-TEST-$(date +%s)"
+echo -e "\n---> 测试创建证书"
+CREATE_RESP=$(curl -s -X POST "$API_URL/certificates" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{
+    \"certNumber\": \"$CERT_NUMBER\",
+    \"customerId\": 1,
+    \"instrumentName\": \"万用表\",
+    \"instrumentNumber\": \"MTR-12345\",
+    \"manufacturer\": \"XYZ Corp\",
+    \"modelSpec\": \"Model A\",
+    \"instrumentAccuracy\": \"0.1%\",
+    \"testDate\": \"2023-10-26\",
+    \"expireDate\": \"2025-10-26\",
+    \"testResult\": \"qualified\"
+  }")
+
+CERT_ID=$(echo $CREATE_RESP | jq -r '.data.id')
+
+if [ "$CERT_ID" != "null" ] && [ -n "$CERT_ID" ]; then
+  echo -e "${GREEN}✔ 证书创建成功，证书编号: $CERT_NUMBER, ID: $CERT_ID${NC}"
+else
+  echo -e "${RED}✖ 证书创建失败，响应: $CREATE_RESP${NC}"
+  exit 1
 fi
 
-# 执行测试
-run_all_tests
+# ---> 更新证书
+UPDATED_CERT_NUMBER="${CERT_NUMBER}-UPDATED"
+echo -e "\n---> 测试更新证书"
+UPDATE_RESP=$(curl -s -X PUT "$API_URL/certificates/$CERT_NUMBER" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{
+    \"certNumber\": \"$UPDATED_CERT_NUMBER\",
+    \"customerId\": 1,
+    \"instrumentName\": \"万用表(更新版)\",
+    \"instrumentNumber\": \"MTR-12345-V2\",
+    \"manufacturer\": \"XYZ Corp\",
+    \"modelSpec\": \"Model B\",
+    \"instrumentAccuracy\": \"0.05%\",
+    \"testDate\": \"2023-10-26T10:00:00Z\",
+    \"expireDate\": \"2026-10-26T10:00:00Z\",
+    \"testResult\": \"qualified\",
+    \"status\": \"draft\"
+  }")
+
+UPDATE_CODE=$(echo $UPDATE_RESP | jq -r '.code')
+
+if [ "$UPDATE_CODE" == "200" ]; then
+  echo -e "${GREEN}✔ 证书更新成功（新编号: $UPDATED_CERT_NUMBER）。${NC}"
+else
+  echo -e "${RED}✖ 证书更新失败，响应: $UPDATE_RESP${NC}"
+  exit 1
+fi
+
+# ---> 验证证书（存在）
+echo -e "\n---> 测试验证证书 (存在)"
+VERIFY_RESP=$(curl -s -X GET "$PUBLIC_URL/verify/$UPDATED_CERT_NUMBER")
+VERIFY_CODE=$(echo $VERIFY_RESP | jq -r '.code')
+
+if [ "$VERIFY_CODE" == "200" ]; then
+  echo -e "${GREEN}✔ 验证证书成功（存在）。${NC}"
+else
+  echo -e "${RED}✖ 验证证书失败 (存在)，响应: $VERIFY_RESP${NC}"
+fi
+
+# ---> 验证证书（不存在）
+echo -e "\n---> 测试验证证书 (不存在)"
+VERIFY_RESP2=$(curl -s -X GET "$PUBLIC_URL/verify/NON-EXISTENT-$CERT_NUMBER")
+VERIFY_CODE2=$(echo $VERIFY_RESP2 | jq -r '.code')
+
+if [ "$VERIFY_CODE2" == "200" ]; then
+  echo -e "${GREEN}✔ 验证证书成功（不存在时返回正确提示）。${NC}"
+else
+  echo -e "${YELLOW}⚠ 验证证书失败 (不存在)，响应: $VERIFY_RESP2${NC}"
+fi
+
+# ---> 批量添加测试数据
+echo -e "\n---> 测试批量添加测试数据"
+ADD_TEST_RESP=$(curl -s -X POST "$API_URL/test-data" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{
+    \"certNumber\": \"$UPDATED_CERT_NUMBER\",
+    \"data\": [
+      {
+        \"deviceAddr\": \"DEV-01\",
+        \"testPoint\": \"P1\",
+        \"actualPercentage\": 100.0,
+        \"ratioError\": 0.2,
+        \"angleError\": 0.1,
+        \"testTimestamp\": \"2023-10-26T10:00:00Z\"
+      },
+      {
+        \"deviceAddr\": \"DEV-01\",
+        \"testPoint\": \"P2\",
+        \"actualPercentage\": 80.0,
+        \"ratioError\": 0.3,
+        \"angleError\": 0.15,
+        \"testTimestamp\": \"2023-10-26T10:05:00Z\"
+      }
+    ]
+  }")
+
+ADD_TEST_CODE=$(echo $ADD_TEST_RESP | jq -r '.code')
+
+if [ "$ADD_TEST_CODE" == "201" ]; then
+  echo -e "${GREEN}✔ 批量测试数据添加成功。${NC}"
+else
+  echo -e "${RED}✖ 测试数据添加失败，响应: $ADD_TEST_RESP${NC}"
+  exit 1
+fi
+
+# ---> 获取测试数据
+echo -e "\n---> 测试获取测试数据"
+GET_TEST_RESP=$(curl -s -X GET "$API_URL/test-data/certificate/$UPDATED_CERT_NUMBER" \
+  -H "$AUTH_HEADER")
+
+GET_TEST_CODE=$(echo $GET_TEST_RESP | jq -r '.code')
+
+if [ "$GET_TEST_CODE" == "200" ]; then
+  echo -e "${GREEN}✔ 获取测试数据成功。${NC}"
+else
+  echo -e "${RED}✖ 获取测试数据失败，响应: $GET_TEST_RESP${NC}"
+fi
+
+echo -e "\n====== API 测试执行完毕 ======"

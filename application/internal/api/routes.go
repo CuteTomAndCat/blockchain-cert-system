@@ -2,21 +2,25 @@ package api
 
 import (
 	"cert-system/internal/service"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
+	"net/http"
+	"github.com/gin-contrib/cors"
 )
 
 // SetupRoutes 设置API路由
-func SetupRoutes(router *gin.Engine, 
-	certService *service.CertificateService,
-	testDataService *service.TestDataService,
-	authService *service.AuthService) {
-
+func SetupRoutes(router *gin.Engine, certService *service.CertificateService, testDataService *service.TestDataService, authService *service.AuthService) {
+	 router.Use(cors.New(cors.Config{
+        AllowOrigins:     []string{"*"}, // 生产环境可限制具体域名
+        AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+        AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+        ExposeHeaders:    []string{"Content-Length"},
+        AllowCredentials: true,
+    }))
+	
 	// 健康检查
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
+			"status":  "ok",
 			"message": "计量证书防伪溯源系统运行正常",
 		})
 	})
@@ -49,17 +53,17 @@ func SetupRoutes(router *gin.Engine,
 		testData := v1.Group("/test-data")
 		testData.Use(AuthMiddleware())
 		{
-			testHandler := NewTestDataHandler(testDataService)
-			testData.POST("", testHandler.AddTestData)
-			testData.POST("/batch", testHandler.BatchAddTestData)
+			testHandler := NewTestDataHandler(testDataService, certService)
+			testData.POST("", testHandler.AddTestData)                
 			testData.GET("/certificate/:certId", testHandler.GetTestDataByCert)
-			testData.POST("/generate/:certId", testHandler.GenerateTestData)
+			// 如果需要生成测试数据，可以保留：
+			// testData.POST("/generate/:certId", testHandler.GenerateTestData)
 		}
 
 		// 公开验证接口（不需要认证）
 		public := v1.Group("/public")
 		{
-			public.POST("/verify/:certNumber", NewCertificateHandler(certService).PublicVerifyCertificate)
+			public.GET("/verify/:certNumber", NewCertificateHandler(certService).PublicVerifyCertificate)
 		}
 
 		// 系统管理相关路由（仅管理员）

@@ -37,19 +37,14 @@ type Certificate struct {
 
 // TestData 测试数据结构体
 type TestData struct {
-	CertNumber         string  `json:"certNumber"`         // 证书编号
-	DeviceAddr         string  `json:"deviceAddr"`         // 设备地址
-	DataType           string  `json:"dataType"`           // 数据类型
-	PercentageValue    float64 `json:"percentageValue"`    // 百分表值
-	RatioError         float64 `json:"ratioError"`         // 比差值
-	AngleError         float64 `json:"angleError"`         // 角差值
-	CurrentValue       float64 `json:"currentValue"`       // 电流值
-	VoltageValue       float64 `json:"voltageValue"`       // 电压值
-	WorkstationNumber  string  `json:"workstationNumber"`  // 工位号
-	TestPoint          string  `json:"testPoint"`          // 测试点
-	ActualPercentage   float64 `json:"actualPercentage"`   // 实际值
-	TestTimestamp      string  `json:"testTimestamp"`      // 测试时间
-	EncryptedData      string  `json:"encryptedData"`      // 国密加密数据
+	CertNumber       string  `json:"certNumber"`
+	DeviceAddr       string  `json:"deviceAddr"`
+	TestPoint        string  `json:"testPoint"`
+	ActualPercentage float64 `json:"actualPercentage"`
+	RatioError       float64 `json:"ratioError"`
+	AngleError       float64 `json:"angleError"`
+	TestTimestamp    string  `json:"testTimestamp"`
+	EncryptedData    string  `json:"encryptedData"`
 }
 
 // QueryResult 查询结果结构体
@@ -182,9 +177,8 @@ func (c *CertChaincode) AddTestData(ctx contractapi.TransactionContextInterface,
 	testData.TestTimestamp = time.Now().Format(time.RFC3339)
 
 	// 对敏感数据进行国密SM4加密（这里使用示例密钥，实际应用中应使用安全的密钥管理）
-	sensitiveData := fmt.Sprintf("%.6f|%.6f|%.6f|%.3f|%.3f", 
-		testData.PercentageValue, testData.RatioError, testData.AngleError,
-		testData.CurrentValue, testData.VoltageValue)
+	sensitiveData := fmt.Sprintf("%.6f|%.6f|%s", 
+    	testData.ActualPercentage, testData.RatioError, testData.TestPoint)
 	
 	encryptedData, err := c.encryptWithSM4(sensitiveData, "1234567890123456") // 16字节密钥
 	if err != nil {
